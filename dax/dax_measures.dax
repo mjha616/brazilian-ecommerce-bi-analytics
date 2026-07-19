@@ -1,0 +1,164 @@
+// ============================================================================
+// Enterprise E-Commerce BI Solution - Advanced DAX Measure Registry
+// Target System: Power BI Desktop
+// Purpose: Provide high-performance measures using advanced DAX functions.
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// 1. BASE MEASURES
+// ----------------------------------------------------------------------------
+
+Revenue = 
+SUM ( 'fact_order_items'[price] )
+
+Freight = 
+SUM ( 'fact_order_items'[freight_value] )
+
+GMV = 
+[Revenue] + [Freight]
+
+Orders = 
+DISTINCTCOUNT ( 'fact_order_items'[order_id] )
+
+Customers = 
+DISTINCTCOUNT ( 'fact_order_items'[customer_unique_id] )
+
+Items Sold = 
+COUNTROWS ( 'fact_order_items' )
+
+// Standard division with safe fallback using DIVIDE()
+AOV = 
+DIVIDE ( 
+    [Revenue], 
+    [Orders], 
+    0 
+)
+
+
+// ----------------------------------------------------------------------------
+// 2. ADVANCED TIME INTELLIGENCE & WINDOW MEASURES
+// ----------------------------------------------------------------------------
+
+Revenue YTD = 
+TOTALYTD ( 
+    [Revenue], 
+    'dim_date'[date_actual] 
+)
+
+// REMOVEFILTERS() clears the calendar filter context to compute last year's value
+Revenue LY = 
+CALCULATE ( 
+    [Revenue], 
+    SAMEPERIODLASTYEAR ( 'dim_date'[date_actual] ) 
+)
+
+YoY % = 
+VAR CurrentRevenue = [Revenue]
+VAR PriorRevenue = [Revenue] -- SAMEPERIODLASTYEAR context
+RETURN
+    DIVIDE ( 
+        CurrentRevenue - PriorRevenue, 
+        PriorRevenue, 
+        0 
+    )
+
+// ALLSELECTED() is used to calculate percentages relative to the user's active slicers
+Revenue Pct of Selected Total = 
+VAR CurrentCategoryRevenue = [Revenue]
+VAR AllCategoryRevenue = 
+    CALCULATE ( 
+        [Revenue], 
+        ALLSELECTED ( 'dim_products'[category] ) 
+    )
+RETURN
+    DIVIDE ( 
+        CurrentCategoryRevenue, 
+        AllCategoryRevenue, 
+        0 
+    )
+
+// Rolling 12 Months Revenue
+Revenue Rolling 12M = 
+CALCULATE (
+    [Revenue],
+    DATESINPERIOD ( 
+        'dim_date'[date_actual], 
+        MAX ( 'dim_date'[date_actual] ), 
+        -12, 
+        MONTH 
+    )
+)
+
+// 7-Day Moving Average Revenue
+Revenue 7D Moving Average = 
+VAR MaxDate = MAX ( 'dim_date'[date_actual] )
+VAR Period = 
+    DATESINPERIOD ( 
+        'dim_date'[date_actual], 
+        MaxDate, 
+        -7, 
+        DAY 
+    )
+RETURN
+    AVERAGEX ( 
+        Period, 
+        [Revenue] 
+    )
+
+
+// ----------------------------------------------------------------------------
+// 3. ADVANCED CONTEXT & FILTER CONTROL MEASURES
+// ----------------------------------------------------------------------------
+
+// KEEPFILTERS() preserves the existing filter context rather than overwriting it
+Delivered Late Revenue = 
+CALCULATE (
+    [Revenue],
+    KEEPFILTERS ( 'dim_orders'[is_late] = 1 ),
+    KEEPFILTERS ( 'dim_orders'[order_status] = "delivered" )
+)
+
+// USERELATIONSHIP() activates an inactive relationship (e.g. shipping limit date vs purchase date)
+Revenue by Shipping Limit Date = 
+CALCULATE (
+    [Revenue],
+    USERELATIONSHIP ( 'fact_order_items'[shipping_limit_date], 'dim_date'[date_actual] )
+)
+
+
+// ----------------------------------------------------------------------------
+// 4. INTERFACE & DISPLAY SEGMENTATION MEASURES
+// ----------------------------------------------------------------------------
+
+// ISINSCOPE() and HASONEVALUE() check the hierarchy level of a table visual
+Sales Contribution Tier Label = 
+IF (
+    ISINSCOPE ( 'dim_products'[category] ),
+    VAR CategoryRevenue = [Revenue]
+    VAR MedianCategoryRevenue = 
+        MEDIANX ( 
+            ALL ( 'dim_products'[category] ), 
+            [Revenue] 
+        )
+    RETURN
+        IF ( 
+            CategoryRevenue > MedianCategoryRevenue, 
+            "High Contributor", 
+            "Low Contributor" 
+        ),
+    BLANK()
+)
+
+// Dynamic header title using HASONEVALUE() and COALESCE()
+Dynamic Report Header = 
+VAR HasSingleCategory = HASONEVALUE ( 'dim_products'[category] )
+VAR SelectedCategory = SELECTEDVALUE ( 'dim_products'[category] )
+RETURN
+    COALESCE (
+        IF ( 
+            HasSingleCategory, 
+            "Category Performance Dashboard: " & SelectedCategory, 
+            "Global Marketplace Executive Summary" 
+        ),
+        "Global Marketplace Executive Summary"
+    )
